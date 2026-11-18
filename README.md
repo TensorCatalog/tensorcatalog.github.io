@@ -6,7 +6,7 @@ Standard autoregressive decoding links successive steps only through sampled dis
 
 ## 1 Introduction
 
-Modern language models [3-6, 18-20, 42] generate text autoregressively. Each decoding step produces a top-layer hidden state $\boldsymbol{h}_t$ processed by the full Transformer [51] stack, yet only a sampled discrete token $x_{t+1}$ is directly passed to the next step. This lossy discretization discards rich information encoded in $\boldsymbol{h}_t$. Preserving this state suggests a complementary computational scaling axis that reuses computation across decoding steps, rather than relying only on more parameters or training tokens.
+Modern language models [3-6, 18-20, 42] generate text autoregressively. Each decoding step produces a top-layer hidden state $\boldsymbol{h}\_t$ processed by the full Transformer [51] stack, yet only a sampled discrete token $x\_{t+1}$ is directly passed to the next step. This lossy discretization discards rich information encoded in $\boldsymbol{h}\_t$. Preserving this state suggests a complementary computational scaling axis that reuses computation across decoding steps, rather than relying only on more parameters or training tokens.
 
 An empirical clue supporting this direction comes from recurrent multi-token prediction (MTP) [10, 22]. A recurrent MTP module resembles a standard autoregressive language model, but additionally receives the backbone's previous-position hidden state alongside the token embedding. With only about $2\%$ additional parameters, it achieves a loss comparable to that of a standalone model one quarter the size of the backbone. This observation motivates our hypothesis that the backbone itself can benefit from recycling its previous output hidden state. Building on this observation, we introduce Recycler, a simple architecture that augments the current token embedding with the previous token's top-layer hidden state through a lightweight adapter. Whereas standard autoregressive decoding compresses the latest top-layer output into a sampled discrete token before the next step, Recycler retains this token path while adding a parallel continuous path that directly carries the full-stack hidden state forward, as illustrated in Figure 2. This recycle branch bypasses the discrete bottleneck and creates a continuous recurrent computation whose effective depth grows with the generated sequence. Notably, since the previous hidden state is already available and the adapter is lightweight, Recycler has approximately the same autoregressive decoding cost as a standard Transformer.
 
@@ -18,10 +18,10 @@ Beyond the architecture itself, we develop an end-to-end framework that supports
 
 ### 2.1 Architecture
 
-As shown in Figure 2 (a), during standard autoregressive decoding, token $x_t$ is mapped to its embedding and fed into the Transformer backbone $\mathcal{T}$ to produce the top-layer hidden state $\boldsymbol{h}_t$. The hidden state is then projected by the unembedding layer, from which the next token $x_{t+1}$ is sampled and re-embedded as the input to the next decoding step. Let $\Phi$ denote this stochastic discrete feedback operation, consisting of unembedding, softmax normalization, token sampling, and re-embedding. The relationship between two consecutive hidden states can then be written compactly as
+As shown in Figure 2 (a), during standard autoregressive decoding, token $x\_t$ is mapped to its embedding and fed into the Transformer backbone $\mathcal{T}$ to produce the top-layer hidden state $\boldsymbol{h}\_t$. The hidden state is then projected by the unembedding layer, from which the next token $x\_{t+1}$ is sampled and re-embedded as the input to the next decoding step. Let $\Phi$ denote this stochastic discrete feedback operation, consisting of unembedding, softmax normalization, token sampling, and re-embedding. The relationship between two consecutive hidden states can then be written compactly as
 
 $$
-\boldsymbol{h}_{t+1} = \mathcal{T}\big(\Phi(\boldsymbol{h}_t)\big). \tag{1}
+\boldsymbol{h}\_{t+1} = \mathcal{T}\big(\Phi(\boldsymbol{h}\_t)\big). \tag{1}
 $$
 
 The discrete feedback operator $\Phi$ forms an information bottleneck: it maps a continuous hidden state carrying rich contextual information to a discrete token ID before reconstructing an input embedding. Our key observation is that this bottleneck is not necessary for propagating information across autoregressive decoding steps, because the previous hidden state has already been computed and remains available. Recycling that state provides a richer input to the next step without requiring an additional backbone forward pass, incurring only the negligible cost of a lightweight adapter.
@@ -39,14 +39,14 @@ $$
 The relationship between consecutive hidden states in Recycler then becomes
 
 $$
-\boldsymbol{h}_{t+1} = \mathcal{T}\big(x_{t+1} \oplus \boldsymbol{h}_t\big) = \mathcal{T}\big(\Phi(\boldsymbol{h}_t) + \mathcal{A}(\boldsymbol{h}_t)\big). \tag{3}
+\boldsymbol{h}\_{t+1} = \mathcal{T}\big(x\_{t+1} \oplus \boldsymbol{h}\_t\big) = \mathcal{T}\big(\Phi(\boldsymbol{h}\_t) + \mathcal{A}(\boldsymbol{h}\_t)\big). \tag{3}
 $$
 
 **(a) Standard Decoding**
 
 **(b) Recycler Decoding**
 
-**Legend:** Token $x_j$ | Hidden State $\boldsymbol{h}_j$ | $(k)$ Recycle Step | $\oplus$ Fuse Operator | Unembed | Hidden Recycle
+**Legend:** Token $x\_j$ | Hidden State $\boldsymbol{h}\_j$ | $(k)$ Recycle Step | $\oplus$ Fuse Operator | Unembed | Hidden Recycle
 
 **Figure 2** (a) Decoding process of the standard model, (b) decoding process of the Recycler model, and (c) training and prefill procedure of the Recycler model.
 
@@ -58,36 +58,36 @@ We next describe how the recurrent Recycler architecture is executed during deco
 
 #### 2.2.1 Decoding
 
-At generation time, Eq. (3) is applied recursively after each sampled token: the hidden state from the current step is adapted and combined with the next token embedding to produce the next hidden state. We write $\boldsymbol{h}_t^{(k_{\mathrm{dec}})}$, where the superscript $k_{\mathrm{dec}}$ denotes the effective **decoding recycle depth**. At depth $k_{\mathrm{dec}}$, the current hidden state can incorporate continuous information propagated through the most recent $k_{\mathrm{dec}}$ positions. This recurrence is not truncated during autoregressive decoding, so $k_{\mathrm{dec}}$ grows with the generated sequence length. This creates an effectively unbounded-depth information pathway without requiring additional backbone passes per generated token.
+At generation time, Eq. (3) is applied recursively after each sampled token: the hidden state from the current step is adapted and combined with the next token embedding to produce the next hidden state. We write $\boldsymbol{h}\_t^{(k\_{\mathrm{dec}})}$, where the superscript $k\_{\mathrm{dec}}$ denotes the effective **decoding recycle depth**. At depth $k\_{\mathrm{dec}}$, the current hidden state can incorporate continuous information propagated through the most recent $k\_{\mathrm{dec}}$ positions. This recurrence is not truncated during autoregressive decoding, so $k\_{\mathrm{dec}}$ grows with the generated sequence length. This creates an effectively unbounded-depth information pathway without requiring additional backbone passes per generated token.
 
 #### 2.2.2 Training
 
-Exact training under Eq. (3) would introduce a sequential hidden-state dependency across token positions, preventing the standard token-parallel training of Transformers. We instead truncate the recycle depth to a fixed training depth $k_{\mathrm{train}}$ and approximate the recurrence using $k_{\mathrm{train}}$ sequence-level forward passes:
+Exact training under Eq. (3) would introduce a sequential hidden-state dependency across token positions, preventing the standard token-parallel training of Transformers. We instead truncate the recycle depth to a fixed training depth $k\_{\mathrm{train}}$ and approximate the recurrence using $k\_{\mathrm{train}}$ sequence-level forward passes:
 
 $$
 \begin{aligned}
-\boldsymbol{h}_t^{(1)} &= \mathcal{T}\big(\mathrm{Emb}(x_t)\big), \\
-\boldsymbol{h}_t^{(i)} &= \mathcal{T}\big(\mathrm{Emb}(x_t) + \mathcal{A}(\boldsymbol{h}_{t-1}^{(i-1)})\big), \\
-\mathcal{L}^{(i)} &= \sum_t \mathrm{NTP}\big(\boldsymbol{h}_t^{(i)}, x_{t+1}\big), \qquad
-\mathcal{L} = \sum_{i=1}^{k_{\mathrm{train}}} \mathcal{L}^{(i)}.
+\boldsymbol{h}\_t^{(1)} &= \mathcal{T}\big(\mathrm{Emb}(x\_t)\big), \\
+\boldsymbol{h}\_t^{(i)} &= \mathcal{T}\big(\mathrm{Emb}(x\_t) + \mathcal{A}(\boldsymbol{h}\_{t-1}^{(i-1)})\big), \\
+\mathcal{L}^{(i)} &= \sum\_t \mathrm{NTP}\big(\boldsymbol{h}\_t^{(i)}, x\_{t+1}\big), \qquad
+\mathcal{L} = \sum\_{i=1}^{k\_{\mathrm{train}}} \mathcal{L}^{(i)}.
 \end{aligned}
 \tag{4}
 $$
 
-Here, $\boldsymbol{h}_t^{(i)}$ is the hidden state at position $t$ and recycle depth $i$, and NTP denotes the next-token cross-entropy loss. Given all states from pass $i-1$, all token positions in pass $i$ can be computed in parallel. Thus, the method preserves token-level parallelism while allowing $\boldsymbol{h}_t^{(k_{\mathrm{train}})}$ to incorporate continuous information propagated through the most recent $k_{\mathrm{train}}$ positions. When $k_{\mathrm{train}} \geq t$ (assuming one-indexed positions), it recovers the exact recurrent state in Eq. (3).
+Here, $\boldsymbol{h}\_t^{(i)}$ is the hidden state at position $t$ and recycle depth $i$, and NTP denotes the next-token cross-entropy loss. Given all states from pass $i-1$, all token positions in pass $i$ can be computed in parallel. Thus, the method preserves token-level parallelism while allowing $\boldsymbol{h}\_t^{(k\_{\mathrm{train}})}$ to incorporate continuous information propagated through the most recent $k\_{\mathrm{train}}$ positions. When $k\_{\mathrm{train}} \geq t$ (assuming one-indexed positions), it recovers the exact recurrent state in Eq. (3).
 
 We use three implementation choices to stabilize this approximation:
 
 - We zero-initialize the linear projection in $\mathcal{A}$, making $\mathcal{A}(\cdot) = 0$ at initialization and recovering the standard Transformer computation.
-- We apply the NTP loss to all $k_{\mathrm{train}}$ passes, which aligns the representation spaces of $\boldsymbol{h}_t^{(1)}, \ldots, \boldsymbol{h}_t^{(k_{\mathrm{train}})}$ and reduces the train–decode distribution gap.
+- We apply the NTP loss to all $k\_{\mathrm{train}}$ passes, which aligns the representation spaces of $\boldsymbol{h}\_t^{(1)}, \ldots, \boldsymbol{h}\_t^{(k\_{\mathrm{train}})}$ and reduces the train–decode distribution gap.
 - We tie the input embedding and output projection weights to better align their representation spaces, reducing the mismatch between successive recycle depths.
 
 #### 2.2.3 Prefill
 
 During prompt prefilling, reproducing Eq. (3) token by token would match autoregressive decoding exactly, but would eliminate the sequence parallelism of standard Transformer prefilling. We therefore use parallel forward passes over the full prompt and consider two operating points:
 
-- **Prefill $k_{\mathrm{prefill}} = 2$.** We apply two parallel passes over the prompt and initialize decoding with the final prompt-token state from the second pass. This doubles prefill computation relative to a standard model.
-- **Prefill $k_{\mathrm{prefill}} = 1$.** We perform one standard parallel pass over the prompt and initialize decoding with its final token state. This matches the prefill computation of a standard model.
+- **Prefill $k\_{\mathrm{prefill}} = 2$.** We apply two parallel passes over the prompt and initialize decoding with the final prompt-token state from the second pass. This doubles prefill computation relative to a standard model.
+- **Prefill $k\_{\mathrm{prefill}} = 1$.** We perform one standard parallel pass over the prompt and initialize decoding with its final token state. This matches the prefill computation of a standard model.
 
 Both strategies subsequently use the same recurrent decoding procedure in which the effective recycle depth grows with the generated sequence length.
 
@@ -97,24 +97,24 @@ Building on the decoding recurrence, parallel training approximation, and prefil
 
 #### 2.3.1 Pretraining
 
-We apply the parallel approximation from Section 2.2.2 with $k_{\mathrm{train}} = 2$ to the full pretraining sequence and supervise both recycle depths with the NTP objective. Because pretraining examples are treated as continuous token sequences, there is no separate prompt-prefill region during optimization.
+We apply the parallel approximation from Section 2.2.2 with $k\_{\mathrm{train}} = 2$ to the full pretraining sequence and supervise both recycle depths with the NTP objective. Because pretraining examples are treated as continuous token sequences, there is no separate prompt-prefill region during optimization.
 
-**Extrapolation Analysis.** Considering that Recycler is trained using an approximate algorithm, its inference procedure is not fully aligned with the training process. This discrepancy raises a natural concern that the approximation used during training might not generalize well to the decoding stage. We first conduct a validation experiment to examine this: we train a tiny Recycler model (MoE architecture, 151M activated parameters, 1B total parameters) with $k_{\mathrm{train}} = 2$ for 200B tokens. During inference, we vary $k_{\mathrm{dec}}$ from 1 to 32 to assess whether performance remains stable beyond the training depth. The results are shown in Figure 3:
+**Extrapolation Analysis.** Considering that Recycler is trained using an approximate algorithm, its inference procedure is not fully aligned with the training process. This discrepancy raises a natural concern that the approximation used during training might not generalize well to the decoding stage. We first conduct a validation experiment to examine this: we train a tiny Recycler model (MoE architecture, 151M activated parameters, 1B total parameters) with $k\_{\mathrm{train}} = 2$ for 200B tokens. During inference, we vary $k\_{\mathrm{dec}}$ from 1 to 32 to assess whether performance remains stable beyond the training depth. The results are shown in Figure 3:
 
-**Figure 3** Extrapolation analysis under increasing decoding recycle depth $k_{\mathrm{dec}}$. The model is trained with $k_{\mathrm{train}} = 2$ and evaluated with $k_{\mathrm{dec}} \in [1, 32]$ on an i.i.d. evaluation set and the downstream benchmarks MMLU and C-Eval.
+**Figure 3** Extrapolation analysis under increasing decoding recycle depth $k\_{\mathrm{dec}}$. The model is trained with $k\_{\mathrm{train}} = 2$ and evaluated with $k\_{\mathrm{dec}} \in [1, 32]$ on an i.i.d. evaluation set and the downstream benchmarks MMLU and C-Eval.
 
-- When $k_{\mathrm{dec}} = 1$, the model already achieves substantial gains over the baseline, indicating that even without using the hidden state of the previous token, this training practice of incorporating future token loss into consideration still yields performance benefits.
-- When $k_{\mathrm{dec}} > 1$, the Recycler model achieves further gains and remains stable across subsequent extrapolation steps. This indicates that the training-inference inconsistency in Recycler can be naturally mitigated through extrapolative generalization.
+- When $k\_{\mathrm{dec}} = 1$, the model already achieves substantial gains over the baseline, indicating that even without using the hidden state of the previous token, this training practice of incorporating future token loss into consideration still yields performance benefits.
+- When $k\_{\mathrm{dec}} > 1$, the Recycler model achieves further gains and remains stable across subsequent extrapolation steps. This indicates that the training-inference inconsistency in Recycler can be naturally mitigated through extrapolative generalization.
 
 The training cost of Recycler is $2\times$ that of the standard model. Through the extrapolation experiments above, we have preliminarily demonstrated the effectiveness of our approximate training method. However, as the model size and data volume grow, extrapolation issues may arise and lead to a higher evaluation loss, as illustrated in Figure 4. To address this, we perform a third forward pass on a subset of steps during training. Compared to Recycler training with two forward passes, this approach incurs only an additional $3.3\%$ in training cost while fully resolving the extrapolation problem of Recycler.
 
-**Figure 4** Evaluation loss under increasing $k_{\mathrm{dec}}$ for the original $k_{\mathrm{train}} = 2$ recipe and a partial $k_{\mathrm{train}} = 3$ recipe with additional $3.3\%$ training cost.
+**Figure 4** Evaluation loss under increasing $k\_{\mathrm{dec}}$ for the original $k\_{\mathrm{train}} = 2$ recipe and a partial $k\_{\mathrm{train}} = 3$ recipe with additional $3.3\%$ training cost.
 
 #### 2.3.2 Supervised Fine-Tuning
 
-SFT mainly requires aligning response training with the prompt-prefill strategy used at inference. Response tokens follow the parallel training approximation in Section 2.2.2 with $k_{\mathrm{train}} = 2$, and the NTP loss is masked to the response region. For $k_{\mathrm{prefill}} = 2$, both prompt passes retain the recycled-hidden pathway. For $k_{\mathrm{prefill}} = 1$, the second pass is still required to train response tokens, but the recycled contribution $\mathcal{A}(\boldsymbol{h}_{t-1}^{(1)})$ is set to zero at prompt positions to match single-pass prefilling.
+SFT mainly requires aligning response training with the prompt-prefill strategy used at inference. Response tokens follow the parallel training approximation in Section 2.2.2 with $k\_{\mathrm{train}} = 2$, and the NTP loss is masked to the response region. For $k\_{\mathrm{prefill}} = 2$, both prompt passes retain the recycled-hidden pathway. For $k\_{\mathrm{prefill}} = 1$, the second pass is still required to train response tokens, but the recycled contribution $\mathcal{A}(\boldsymbol{h}\_{t-1}^{(1)})$ is set to zero at prompt positions to match single-pass prefilling.
 
-Generally speaking, models trained and inferred with prefill $k_{\mathrm{prefill}} = 2$ exhibit markedly better performance on downstream metrics than those using prefill $k_{\mathrm{prefill}} = 1$.
+Generally speaking, models trained and inferred with prefill $k\_{\mathrm{prefill}} = 2$ exhibit markedly better performance on downstream metrics than those using prefill $k\_{\mathrm{prefill}} = 1$.
 
 #### 2.3.3 Reinforcement Learning
 
@@ -123,24 +123,24 @@ For RL, the main adaptation lies in the rollout process: the prompt follows the 
 To further stabilize training, we adopt GSPO [65] as our reinforcement learning algorithm:
 
 $$
-\mathcal{J}_{\mathrm{GSPO}}(\theta)
-= \mathbb{E}_{x \sim \mathcal{D},\, \{y_i\}_{i=1}^{G} \sim \pi_{\theta_{\mathrm{old}}}(\cdot \mid x)}
-\left[ \frac{1}{G} \sum_{i=1}^{G} \min\Big( s_i(\theta)\, \hat{A}_i,\; \mathrm{clip}\big(s_i(\theta),\, 1 - \varepsilon_{\mathrm{low}},\, 1 + \varepsilon_{\mathrm{high}}\big)\, \hat{A}_i \Big) \right],
+\mathcal{J}\_{\mathrm{GSPO}}(\theta)
+= \mathbb{E}\_{x \sim \mathcal{D},\, \{y\_i\}\_{i=1}^{G} \sim \pi\_{\theta\_{\mathrm{old}}}(\cdot \mid x)}
+\left[ \frac{1}{G} \sum\_{i=1}^{G} \min\Big( s\_i(\theta)\, \hat{A}\_i,\; \mathrm{clip}\big(s\_i(\theta),\, 1 - \varepsilon\_{\mathrm{low}},\, 1 + \varepsilon\_{\mathrm{high}}\big)\, \hat{A}\_i \Big) \right],
 \tag{5}
 $$
 
 where $G$ is the number of generated responses to each query $x$, and the group-based advantage estimation is:
 
 $$
-\hat{A}_i = \frac{r(x, y_i) - \mathrm{mean}\big(\{r(x, y_j)\}_{j=1}^{G}\big)}{\mathrm{std}\big(\{r(x, y_j)\}_{j=1}^{G}\big)}, \tag{6}
+\hat{A}\_i = \frac{r(x, y\_i) - \mathrm{mean}\big(\{r(x, y\_j)\}\_{j=1}^{G}\big)}{\mathrm{std}\big(\{r(x, y\_j)\}\_{j=1}^{G}\big)}, \tag{6}
 $$
 
-and the importance ratio $s_i(\theta)$ is defined on sequence level, which addresses the high-variance issue of the importance ratio in GRPO:
+and the importance ratio $s\_i(\theta)$ is defined on sequence level, which addresses the high-variance issue of the importance ratio in GRPO:
 
 $$
-s_i(\theta)
-= \left( \frac{\pi_{\theta}(y_i \mid x)}{\pi_{\theta_{\mathrm{old}}}(y_i \mid x)} \right)^{\frac{1}{|y_i|}}
-= \exp\left( \frac{1}{|y_i|} \sum_{t=1}^{|y_i|} \log \frac{\pi_{\theta}(y_{i,t} \mid x, y_{i,<t})}{\pi_{\theta_{\mathrm{old}}}(y_{i,t} \mid x, y_{i,<t})} \right). \tag{7}
+s\_i(\theta)
+= \left( \frac{\pi\_{\theta}(y\_i \mid x)}{\pi\_{\theta\_{\mathrm{old}}}(y\_i \mid x)} \right)^{\frac{1}{|y\_i|}}
+= \exp\left( \frac{1}{|y\_i|} \sum\_{t=1}^{|y\_i|} \log \frac{\pi\_{\theta}(y\_{i,t} \mid x, y\_{i,<t})}{\pi\_{\theta\_{\mathrm{old}}}(y\_{i,t} \mid x, y\_{i,<t})} \right). \tag{7}
 $$
 
 As we demonstrate later, under an equal RL training budget, the Recycler architecture yields greater score gains than the standard model.
@@ -153,23 +153,23 @@ For comparisons designed to be controlled, the baseline and Recycler share the s
 
 ### 3.1 Pre-Training
 
-**Setup.** We validate Recycler on two independently trained model versions, denoted $\text{model}_\alpha$ and $\text{model}_\beta$. $\text{model}_\alpha$ provides a controlled comparison between Recycler and its baseline, allowing us to examine both optimization behavior and the evolution of downstream capabilities. $\text{model}_\beta$ provides a complementary scaling comparison.
+**Setup.** We validate Recycler on two independently trained model versions, denoted $\text{model}\_\alpha$ and $\text{model}\_\beta$. $\text{model}\_\alpha$ provides a controlled comparison between Recycler and its baseline, allowing us to examine both optimization behavior and the evolution of downstream capabilities. $\text{model}\_\beta$ provides a complementary scaling comparison.
 
 **Token Efficiency.** As shown in Figure 5, Recycler exhibits markedly lower training and validation loss curve than the baseline. At the end of the training, Recycler achieves approximately $0.02$ gains in training loss. On the held-out validation set, the first forward ($L^{(1)}$) already achieves a reduction of approximately $0.013$, while the recycled second forward ($L^{(2)}$) enlarges the reduction to approximately $0.033$. This indicates that Recycler converges faster and achieves greater token efficiency. On the other hand, this also indicates that, when the training cost of the two forward passes is not taken into account, Recycler can achieve better performance with the same number of training tokens.
 
-**Figure 5** $\text{model}_\alpha$ training and validation loss for Baseline and Recycler in the pre-training stage. The $L^{(1)}$ and $L^{(2)}$ indicate the loss curves with one and two forward passes, respectively.
+**Figure 5** $\text{model}\_\alpha$ training and validation loss for Baseline and Recycler in the pre-training stage. The $L^{(1)}$ and $L^{(2)}$ indicate the loss curves with one and two forward passes, respectively.
 
-**Gains across Benchmark Sources.** We evaluate intermediate $\text{model}_\alpha$ checkpoints on 14 datasets covering knowledge and comprehensive understanding (MMLU [28], MMLU-Pro [54], C-Eval [30], GPQA [45], TriviaQA [34], SimpleQA [56], and ChineseSimpleQA [27]), logical reasoning (AGI-Eval [66], DROP [13], ARC-AGI [9], and BBH [49]), code generation (HumanEval [7] and MBPP+ [1, 38]), and mathematics (MATH [29]).
+**Gains across Benchmark Sources.** We evaluate intermediate $\text{model}\_\alpha$ checkpoints on 14 datasets covering knowledge and comprehensive understanding (MMLU [28], MMLU-Pro [54], C-Eval [30], GPQA [45], TriviaQA [34], SimpleQA [56], and ChineseSimpleQA [27]), logical reasoning (AGI-Eval [66], DROP [13], ARC-AGI [9], and BBH [49]), code generation (HumanEval [7] and MBPP+ [1, 38]), and mathematics (MATH [29]).
 
-At the end of the training, Recycler $\text{model}_\alpha$ outperforms the baseline on all 14 datasets. The downstream average rises from 42.97 to 46.21, an absolute gain of 3.24. The largest gains occur on DROP (+6.31 points), BBH (+5.53), AGI-Eval (+5.35), MBPP+ (+4.76), and MMLU-Pro (+4.40), while knowledge-heavy benchmarks show smaller but still positive improvements. This source-level consistency indicates that the loss reduction in Figure 5 transfers broadly to downstream capabilities, with particularly strong effects on reasoning and structured generation. To further validate the effectiveness of Recycler, we additionally evaluate recycle step $k = 1$. As shown in Figure 6, even when the prompt is processed with only a single forward pass—the same prefill procedure as standard autoregressive inference—Recycler yields clear improvements over the baseline on most evaluation benchmarks.
+At the end of the training, Recycler $\text{model}\_\alpha$ outperforms the baseline on all 14 datasets. The downstream average rises from 42.97 to 46.21, an absolute gain of 3.24. The largest gains occur on DROP (+6.31 points), BBH (+5.53), AGI-Eval (+5.35), MBPP+ (+4.76), and MMLU-Pro (+4.40), while knowledge-heavy benchmarks show smaller but still positive improvements. This source-level consistency indicates that the loss reduction in Figure 5 transfers broadly to downstream capabilities, with particularly strong effects on reasoning and structured generation. To further validate the effectiveness of Recycler, we additionally evaluate recycle step $k = 1$. As shown in Figure 6, even when the prompt is processed with only a single forward pass—the same prefill procedure as standard autoregressive inference—Recycler yields clear improvements over the baseline on most evaluation benchmarks.
 
-**Comparison with a $2.4\times$ Larger Baseline.** We next evaluate $\text{model}_\beta$ to test whether Recycler's additional latent computation can substitute for model scaling. Figure 7 compares three systems: the $\text{model}_\beta$ baseline, a baseline with $2.4\times$ the model size (Baseline $\times 2.4$), and the same-size Recycler. Recycler retains the same token-by-token decoding cost and KV-cache footprint as its same-size baseline, whereas Baseline $\times 2.4$ increases the cost of every decoding step with model size.
+**Comparison with a $2.4\times$ Larger Baseline.** We next evaluate $\text{model}\_\beta$ to test whether Recycler's additional latent computation can substitute for model scaling. Figure 7 compares three systems: the $\text{model}\_\beta$ baseline, a baseline with $2.4\times$ the model size (Baseline $\times 2.4$), and the same-size Recycler. Recycler retains the same token-by-token decoding cost and KV-cache footprint as its same-size baseline, whereas Baseline $\times 2.4$ increases the cost of every decoding step with model size.
 
-The $\text{model}_\beta$ results reproduce the broad source-level gains observed with $\text{model}_\alpha$. Over the available overlap, Recycler improves substantially over the same-size baseline across the benchmark suite. More importantly, at the end of the displayed training window, Recycler reaches a downstream average of 64.76, compared with 66.43 for Baseline $\times 2.4$—a gap of only 1.68 despite the $2.4\times$ difference in model size. Recycler is close to the larger baseline on many individual sources and remains competitive across knowledge, reasoning, mathematics, and code benchmarks. The same-size baseline has a shorter available pre-training trajectory, ending near $50\%$ of the shared display range; we therefore show it without extrapolation and do not treat the three endpoints as an equal-training-budget comparison. The central comparison is instead computational: Recycler nearly matches the substantially larger model while preserving the decoding cost of the smaller model.
+The $\text{model}\_\beta$ results reproduce the broad source-level gains observed with $\text{model}\_\alpha$. Over the available overlap, Recycler improves substantially over the same-size baseline across the benchmark suite. More importantly, at the end of the displayed training window, Recycler reaches a downstream average of 64.76, compared with 66.43 for Baseline $\times 2.4$—a gap of only 1.68 despite the $2.4\times$ difference in model size. Recycler is close to the larger baseline on many individual sources and remains competitive across knowledge, reasoning, mathematics, and code benchmarks. The same-size baseline has a shorter available pre-training trajectory, ending near $50\%$ of the shared display range; we therefore show it without extrapolation and do not treat the three endpoints as an equal-training-budget comparison. The central comparison is instead computational: Recycler nearly matches the substantially larger model while preserving the decoding cost of the smaller model.
 
-**Figure 6** $\text{model}_\alpha$ benchmark trajectories over normalized pre-training progress. Markers denote observed checkpoints; no score smoothing, resampling, or imputation is applied. The bottom-right panel is the equal-weight average of the 14 datasets, computed at checkpoints shared by all datasets within each evaluation path. Recycler ($k = 1$) is shown only over its available early-training range.
+**Figure 6** $\text{model}\_\alpha$ benchmark trajectories over normalized pre-training progress. Markers denote observed checkpoints; no score smoothing, resampling, or imputation is applied. The bottom-right panel is the equal-weight average of the 14 datasets, computed at checkpoints shared by all datasets within each evaluation path. Recycler ($k = 1$) is shown only over its available early-training range.
 
-**Figure 7** $\text{model}_\beta$ benchmark trajectories for the same-size Baseline, Baseline $\times 2.4$, and Recycler over a common normalized training-progress reference. Markers are the recorded checkpoints; no smoothing, interpolation, or score-based filtering is applied. The bottom-right panel is the equal-weight average over the 14 benchmarks. The shorter same-size baseline trajectory is shown only over its available pre-training coverage and is not extrapolated.
+**Figure 7** $\text{model}\_\beta$ benchmark trajectories for the same-size Baseline, Baseline $\times 2.4$, and Recycler over a common normalized training-progress reference. Markers are the recorded checkpoints; no smoothing, interpolation, or score-based filtering is applied. The bottom-right panel is the equal-weight average over the 14 benchmarks. The shorter same-size baseline trajectory is shown only over its available pre-training coverage and is not extrapolated.
 
 **Summary.** The results consistently validate the effectiveness of the Recycler mechanism. Recycling hidden states provides an additional latent-computation step that lowers both training and validation loss, and the resulting gains transfer across all 14 downstream benchmark sources, with particularly strong improvements on reasoning and structured-generation tasks. Moreover, Recycler approaches the performance of a $2.4\times$ larger baseline while retaining the smaller model's autoregressive decoding cost and KV-cache footprint. These findings show that Recycler uses additional latent computation to improve optimization and downstream capability without requiring a proportional increase in model size or token-by-token decoding cost.
 
